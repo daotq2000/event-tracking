@@ -20470,5 +20470,55 @@
     })();
 </script>
 
+<script>
+(function(){
+  // Tạo event_id để dedupe (browser vs server)
+  function uuid(){return (crypto.randomUUID && crypto.randomUUID()) || (Date.now()+"-"+Math.random());}
+
+  // (Tùy chọn) lấy fbc/fbp để bạn đẩy qua CAPI server-side
+  function getParam(name){ return new URL(location.href).searchParams.get(name); }
+  function getCookie(name){ return document.cookie.split('; ').find(x=>x.startsWith(name+'='))?.split('=')[1]; }
+  // fbc khôi phục từ fbclid theo chuẩn: fb.1.<timestamp>.<fbclid>
+  function ensureFbc(){
+    const fbclid = getParam('fbclid');
+    if (!fbclid) return getCookie('_fbc') || null;
+    const ts = Math.floor(Date.now()/1000);
+    const fbc = `fb.1.${ts}.${fbclid}`;
+    document.cookie = `_fbc=${fbc}; path=/; SameSite=Lax`;
+    return fbc;
+  }
+  function ensureFbp(){
+    let fbp = getCookie('_fbp');
+    if (!fbp) {
+      const r = Math.floor(Math.random()*1e10);
+      const ts = Math.floor(Date.now()/1000);
+      fbp = `fb.1.${ts}.${r}`;
+      document.cookie = `_fbp=${fbp}; path=/; SameSite=Lax`;
+    }
+    return fbp;
+  }
+  ensureFbc(); ensureFbp();
+
+  // Gắn listener click banner (đổi selector cho đúng banner của bạn)
+  document.addEventListener('click', function(e){
+    const el = e.target.closest('[data-banner-id], .xs-banner-campaign');
+    if (!el) return;
+
+    const eventId = uuid();
+    const bannerId   = el.getAttribute('data-banner-id') || el.id || 'unknown';
+    const bannerName = el.getAttribute('data-banner-name') || el.title || el.alt || '';
+    const contentIds = [bannerId];
+
+    fbq('trackCustom', 'click_to_detail_banner', {
+      content_ids: contentIds,         // chuẩn FB: mảng ID
+      content_name: bannerName,
+      content_type: 'banner',
+      page: location.href
+    }, {eventID: eventId});            // dùng eventID cho dedupe
+  }, {capture:true});
+})();
+</script>
+
+
 </html>
 <!-- This website is like a Rocket, isn't it? Performance optimized by WP Rocket. Learn more: https://wp-rocket.me - Debug: cached@1754701699 -->
