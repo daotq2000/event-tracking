@@ -14836,166 +14836,80 @@
   });
 </script>
 <script>
-// ========= Helper: nguồn traffic =========
-function detectSource() {
-  const url = new URL(location.href);
-  const utm = (url.searchParams.get('utm_source') || '').toLowerCase();
-  const ref = (document.referrer || '').toLowerCase();
+(function() {
+    // Lấy nguồn truy cập
+    const referrerSource = document.referrer || 'direct';
 
-  const mapRef = [
-    ['facebook', /facebook|fb\.com|fbclid/],
-    ['google', /google|gclid/],
-    ['linkedin', /linkedin|lnkd/],
-    ['tiktok', /tiktok|ttclid/],
-    ['twitter', /twitter|x\.com/],
-    ['youtube', /youtube|youtu\.be/],
-  ];
-
-  if (utm) return utm;
-  for (const [name, rx] of mapRef) if (rx.test(ref)) return name;
-  return ref ? new URL(ref).hostname.replace(/^www\./,'') : 'direct';
-}
-
-// ========= Helper: cookie theo nguồn =========
-function setSourceCookie(source) {
-  // ví dụ giá trị cookie: fb_1700000000 (source_prefix + timestamp)
-  const prefixMap = { facebook:'fb', google:'gg', linkedin:'in', tiktok:'tt', twitter:'tw', youtube:'yt' };
-  const prefix = prefixMap[source] || source.slice(0,2);
-  const val = `${prefix}_${Date.now()}`;
-  // cookie 90 ngày, path toàn site
-  const expires = new Date(Date.now() + 90*24*60*60*1000).toUTCString();
-  document.cookie = `src_cookie=${encodeURIComponent(val)}; expires=${expires}; path=/; SameSite=Lax`;
-  return val;
-}
-function readCookie(name){
-  return document.cookie.split('; ').find(x=>x.startsWith(name+'='))?.split('=')[1];
-}
-
-// ========= Helper: device info =========
-function parseDevice(){
-  const ua = navigator.userAgent;
-  const browser =
-    /edg/i.test(ua) ? 'Edge' :
-    /chrome|crios/i.test(ua) && !/edg/i.test(ua) ? 'Chrome' :
-    /safari/i.test(ua) && !/chrome|crios/i.test(ua) ? 'Safari' :
-    /firefox|fxios/i.test(ua) ? 'Firefox' :
-    /msie|trident/i.test(ua) ? 'IE' : 'Other';
-  const os =
-    /windows/i.test(ua) ? 'Windows' :
-    /macintosh|mac os x/i.test(ua) ? 'macOS' :
-    /android/i.test(ua) ? 'Android' :
-    /iphone|ipad|ipod/i.test(ua) ? 'iOS' : 'Other';
-
-  return { browser, os, userAgent: ua };
-}
-
-// ========= Helper: lấy vị trí & IP =========
-// Ưu tiên Geolocation (cần người dùng cho phép). Fallback gọi endpoint sGTM tự tạo để đọc IP & geo theo request.
-async function getLocationAndIP(){
-  const sGtmBase = 'https://9626b41657e5.ngrok-free.app'; // <--- đổi sang domain sGTM của bạn
-  const result = { city: undefined, region: undefined, country: undefined, lat: undefined, lon: undefined, ip: undefined };
-
-  // 1) Geolocation
-  try {
-    const coords = await new Promise((res, rej)=>{
-      if (!navigator.geolocation) return rej(new Error('no geo'));
-      navigator.geolocation.getCurrentPosition(p=>res(p.coords), err=>rej(err), { enableHighAccuracy:false, timeout:3000 });
-    });
-    result.lat = coords.latitude;
-    result.lon = coords.longitude;
-  } catch(e){ /* ignore */ }
-
-  // 2) Fallback IP+Geo via sGTM (tạo 1 Client + Endpoint trả JSON {ip, city, region, country})
-  try {
-    const r = await fetch(`${sGtmBase}/geo`, { method:'GET', credentials:'omit' });
-    if (r.ok) {
-      const j = await r.json();
-      result.ip = j.ip || result.ip;
-      result.city = j.city || result.city;
-      result.region = j.region || result.region;
-      result.country = j.country || result.country;
-      // nếu server trả luôn lat/lon thì ghi đè
-      if (j.lat) result.lat = j.lat;
-      if (j.lon) result.lon = j.lon;
+    // Lấy cookie prefix theo nguồn
+    function getPrefixedCookies() {
+        let prefix = '';
+        if (referrerSource.includes('facebook')) prefix = 'fb_';
+        else if (referrerSource.includes('google')) prefix = 'gg_';
+        else if (referrerSource.includes('linkedin')) prefix = 'in_';
+        return prefix + document.cookie;
     }
-  } catch(e){ /* ignore */ }
 
-  return result;
-}
+    // Lấy vị trí người dùng qua geolocation (fallback dùng IP API)
+    function getUserLocation(callback) {
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(function(pos) {
+                callback({lat: pos.coords.latitude, lon: pos.coords.longitude});
+            }, function() {
+                fetch('https://ipapi.co/json/')
+                    .then(res => res.json())
+                    .then(data => callback({city: data.city, region: data.region, country: data.country_name}))
+                    .catch(() => callback({}));
+            });
+        } else {
+            fetch('https://ipapi.co/json/')
+                .then(res => res.json())
+                .then(data => callback({city: data.city, region: data.region, country: data.country_name}))
+                .catch(() => callback({}));
+        }
+    }
 
-// ========= Gửi về sGTM =========
-async function sendToSGTM(payload){
-  const sGtmBase = 'https://9626b41657e5.ngrok-free.app'; // <--- đổi sang domain sGTM của bạn
-  // Tạo endpoint "collect" trong sGTM (Client: HTTP / Event Name passthrough) để nhận POST JSON
-  return fetch(`${sGtmBase}/collect`, {
-    method: 'POST',
-    headers: { 'Content-Type':'application/json' },
-    keepalive: true, // gửi được cả khi điều hướng sau click
-    body: JSON.stringify(payload)
-  }).catch(()=>{});
-}
+    // Gửi event lên GTM server
+    function sendEvent(locationData) {
+        const payload = {
+            event: 'click_to_detail_banner',
+            source: referrerSource,
+            cookies: getPrefixedCookies(),
+            location: locationData,
+            device: navigator.userAgent,
+            ip: null // IP sẽ lấy ở server GTM
+        };
 
-// ========= Push vào dataLayer =========
-function pushToDataLayer(data){
-  window.dataLayer = window.dataLayer || [];
-  window.dataLayer.push(data);
-}
+        const params = new URLSearchParams();
+        for (let key in payload) {
+            params.append(key, typeof payload[key] === 'object' ? JSON.stringify(payload[key]) : payload[key]);
+        }
 
-// ========= Handler chính cho click banner =========
-async function handleBannerClick(evt){
-  try {
-    const source = detectSource();
-    const existingCookie = readCookie('src_cookie');
-    const sourceCookie = existingCookie || setSourceCookie(source);
-    const device = parseDevice();
-    const loc = await getLocationAndIP();
+        fetch('https://9626b41657e5.ngrok-free.app/g/collect', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            body: params.toString()
+        }).then(res => {
+            console.log('Event sent:', res.status);
+        }).catch(err => console.error('Send error', err));
+    }
 
-    const eventPayload = {
-      event: 'click_to_detail_banner',
-      banner_id: evt.currentTarget?.dataset?.bannerId || null, // set data-banner-id trên HTML banner nếu cần
-      event_name: 'click_to_detail_banner',
-      user_source: source,
-      source_cookie: sourceCookie,        // ví dụ: fb_1699999999999
-      user_location: {
-        city: loc.city, region: loc.region, country: loc.country,
-        lat: loc.lat, lon: loc.lon
-      },
-      user_device: {
-        browser: device.browser,
-        os: device.os,
-        user_agent: device.userAgent
-      },
-      user_ip: loc.ip || null,
-      page: location.href,
-      referrer: document.referrer || null,
-      ts: Date.now()
-    };
-
-    // 1) Push vào dataLayer (để GTM Web bắt và chuyển tiếp tới GA4/BE/sGTM)
-    pushToDataLayer(eventPayload);
-
-    // 2) Gửi thẳng tới sGTM (song song, bạn có thể tạo tag trong sGTM để forward tới GA4 hoặc BE)
-    sendToSGTM(eventPayload);
-  } catch (e) {
-    // fallback siêu gọn để không chặn click
-    window.dataLayer = window.dataLayer || [];
-    window.dataLayer.push({ event: 'click_to_detail_banner_error', message: String(e) });
-  }
-}
-
-// ========= Gắn listener cho banner =========
-// Cách 1: auto-bind cho mọi phần tử có class .xs-banner-campaign (theo theme hiện có)
-document.addEventListener('click', function(e){
-  const el = e.target.closest('.xs-banner-campaign, [data-banner-id]');
-  if (el) {
-    // thêm id banner nếu muốn phân biệt, ví dụ đặt data-banner-id="home_top_1" trên HTML
-    handleBannerClick({ currentTarget: el });
-  }
-}, { capture: true });
-
-// Cách 2 (tuỳ chọn): nếu bạn có 1 banner cụ thể có id="home-hero-banner", thì:
-// document.getElementById('home-hero-banner')?.addEventListener('click', handleBannerClick);
+    // Gắn listener vào banner
+    document.addEventListener('DOMContentLoaded', function() {
+        const banner = document.querySelector('.xs-banner-campaign');
+        if (banner) {
+            banner.addEventListener('click', function() {
+                getUserLocation(function(loc) {
+                    sendEvent(loc);
+                });
+            });
+        }
+    });
+})();
 </script>
+
+
 
 </html>
 <!-- This website is like a Rocket, isn't it? Performance optimized by WP Rocket. Learn more: https://wp-rocket.me - Debug: cached@1754701699 -->
