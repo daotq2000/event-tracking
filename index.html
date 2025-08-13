@@ -14836,80 +14836,121 @@
   });
 </script>
 <script>
-(function() {
-    // Lấy nguồn truy cập
-    const referrerSource = document.referrer || 'direct';
+(function () {
+  const SGTM_BASE = 'https://9626b41657e5.ngrok-free.app';  // server GTM của bạn
+  const MEASUREMENT_ID = 'G-K37MBM11JP';                     // GA4 Measurement ID
 
-    // Lấy cookie prefix theo nguồn
-    function getPrefixedCookies() {
-        let prefix = '';
-        if (referrerSource.includes('facebook')) prefix = 'fb_';
-        else if (referrerSource.includes('google')) prefix = 'gg_';
-        else if (referrerSource.includes('linkedin')) prefix = 'in_';
-        return prefix + document.cookie;
+  // Lấy _ga -> cid "123456789.123456789"
+  function getCookie(name){
+    return document.cookie.split('; ').find(x=>x.startsWith(name+'='))?.split('=')[1];
+  }
+  function getClientId() {
+    const ga = getCookie('_ga');
+    if (ga) {
+      const p = ga.split('.');
+      if (p.length >= 4) return `${p[2]}.${p[3]}`;
     }
+    return `${Math.floor(Math.random()*1e9)}.${Date.now()}`; // fallback
+  }
 
-    // Lấy vị trí người dùng qua geolocation (fallback dùng IP API)
-    function getUserLocation(callback) {
-        if (navigator.geolocation) {
-            navigator.geolocation.getCurrentPosition(function(pos) {
-                callback({lat: pos.coords.latitude, lon: pos.coords.longitude});
-            }, function() {
-                fetch('https://ipapi.co/json/')
-                    .then(res => res.json())
-                    .then(data => callback({city: data.city, region: data.region, country: data.country_name}))
-                    .catch(() => callback({}));
-            });
-        } else {
-            fetch('https://ipapi.co/json/')
-                .then(res => res.json())
-                .then(data => callback({city: data.city, region: data.region, country: data.country_name}))
-                .catch(() => callback({}));
-        }
-    }
+  // xác định nguồn cơ bản
+  function trafficSource() {
+    const u = new URL(location.href);
+    const utm = (u.searchParams.get('utm_source') || '').toLowerCase();
+    if (utm) return utm;
+    try { return new URL(document.referrer).hostname.replace(/^www\./,'') || 'direct'; }
+    catch { return 'direct'; }
+  }
 
-    // Gửi event lên GTM server
-    function sendEvent(locationData) {
-        const payload = {
-            event: 'click_to_detail_banner',
-            source: referrerSource,
-            cookies: getPrefixedCookies(),
-            location: locationData,
-            device: navigator.userAgent,
-            ip: null // IP sẽ lấy ở server GTM
-        };
+  // đọc/đặt cookie nguồn (do bạn quản lý, không phải cookie FB/Google)
+  function ensureSourceCookie(src) {
+    const PREFIX = {facebook:'fb', google:'gg', linkedin:'in'}[src] || src.slice(0,2) || 'xx';
+    const exist = getCookie('src_cookie');
+    if (exist) return exist;
+    const val = `${PREFIX}_${Date.now()}`;
+    const exp = new Date(Date.now() + 90*24*60*60*1000).toUTCString();
+    document.cookie = `src_cookie=${encodeURIComponent(val)}; expires=${exp}; path=/; SameSite=Lax`;
+    return val;
+  }
 
-        const params = new URLSearchParams();
-        for (let key in payload) {
-            params.append(key, typeof payload[key] === 'object' ? JSON.stringify(payload[key]) : payload[key]);
-        }
-
-        fetch('https://9626b41657e5.ngrok-free.app/g/collect', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded'
-            },
-            body: params.toString()
-        }).then(res => {
-            console.log('Event sent:', res.status);
-        }).catch(err => console.error('Send error', err));
-    }
-
-    // Gắn listener vào banner
-    document.addEventListener('DOMContentLoaded', function() {
-        const banner = document.querySelector('.xs-banner-campaign');
-        if (banner) {
-            banner.addEventListener('click', function() {
-                getUserLocation(function(loc) {
-                    sendEvent(loc);
-                });
-            });
-        }
+  // build & gửi /g/collect (v=2) – body rỗng, mọi thứ trên query
+  function sendGA4Like(eventName, ep = {}, up = {}) {
+    const params = new URLSearchParams({
+      v: '2',
+      tid: MEASUREMENT_ID,
+      cid: getClientId(),
+      en: eventName,
+      dl: location.href,
+      dt: document.title,
+      dr: document.referrer || '',
+      ul: navigator.language || '',
+      sr: `${screen.width}x${screen.height}`,
+      _s: '1'                // sequence; đủ dùng
+      // có thể bổ sung: sid, _p… nếu muốn “chuẩn web SDK” hơn
     });
+
+    // Event parameters (ep.<name>=value). Tên chỉ gồm a-z0-9_
+    Object.entries(ep).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== '') params.append(`ep.${k}`, String(v));
+    });
+
+    // User properties nếu cần (up.<name>=value)
+    Object.entries(up).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== '') params.append(`up.${k}`, String(v));
+    });
+
+    const url = `${SGTM_BASE}/g/collect?${params.toString()}`;
+    if (navigator.sendBeacon) {
+      const ok = navigator.sendBeacon(url, '');
+      if (!ok) fetch(url, { method: 'POST', keepalive: true, body: '' });
+    } else {
+      fetch(url, { method: 'POST', keepalive: true, body: '' });
+    }
+  }
+
+  // đơn giản hóa device info
+  function parseDevice() {
+    const ua = navigator.userAgent;
+    const browser =
+      /edg/i.test(ua) ? 'Edge' :
+      /chrome|crios/i.test(ua) && !/edg/i.test(ua) ? 'Chrome' :
+      /safari/i.test(ua) && !/chrome|crios/i.test(ua) ? 'Safari' :
+      /firefox|fxios/i.test(ua) ? 'Firefox' : 'Other';
+    const os =
+      /windows/i.test(ua) ? 'Windows' :
+      /macintosh|mac os x/i.test(ua) ? 'macOS' :
+      /android/i.test(ua) ? 'Android' :
+      /iphone|ipad|ipod/i.test(ua) ? 'iOS' : 'Other';
+    return { browser, os };
+  }
+
+  // bắt click banner (có thể sửa selector cho phù hợp)
+  document.addEventListener('click', function(e){
+    const el = e.target.closest('[data-banner-id], .xs-banner-campaign');
+    if (!el) return;
+
+    const bannerId =
+      el.getAttribute('data-banner-id') ||
+      el.id || el.getAttribute('data-id') || 'unknown';
+
+    const src = trafficSource();
+    const srcCookie = ensureSourceCookie(src);
+    const dev = parseDevice();
+
+    // Chỉ gửi những gì cho phép vào GA4 (không PII). IP/Geo làm ở sGTM/BE.
+    const eventParams = {
+      banner_id: bannerId,
+      user_source: src,                 // facebook/google/linkedin/direct/hostname
+      source_cookie: srcCookie,         // ví dụ fb_1699999999999
+      device_browser: dev.browser,      // Chrome/Safari/Firefox/…
+      device_os: dev.os                 // Windows/macOS/Android/iOS/…
+    };
+
+    // Gửi event chuẩn GA4
+    sendGA4Like('click_to_detail_banner', eventParams, {});
+  });
 })();
 </script>
-
-
 
 </html>
 <!-- This website is like a Rocket, isn't it? Performance optimized by WP Rocket. Learn more: https://wp-rocket.me - Debug: cached@1754701699 -->
