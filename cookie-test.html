@@ -1,0 +1,18 @@
+<!-- index.html: đặt thêm cookie bằng JS & hiển thị TTL -->
+<button id="ttl">Xem TTL</button>
+<script>
+document.cookie = `js_id=${crypto.randomUUID()}; max-age=${60*60*24*365}; samesite=Lax; secure`;
+
+function getCookie(n){
+  return document.cookie.split(';').map(s=>s.trim()).find(x=>x.startsWith(n+'='))?.split('=')[1];
+}
+function fmt(ms){const s=Math.max(0,Math.floor(ms/1000));
+  const d=Math.floor(s/86400), h=Math.floor(s%86400/3600), m=Math.floor(s%3600/60), ss=s%60;
+  return [d&&`${d} ngày`,h&&`${h} giờ`,m&&`${m} phút`,`${ss} giây`].filter(Boolean).join(' ');
+}
+document.getElementById('ttl').onclick=()=>{
+  const exp=getCookie("http_id_exp");
+  alert(exp?`HTTP cookie hết hạn vào ${new Date(+exp).toLocaleString()} (còn ${fmt(+exp-Date.now())})`
+            :`Không đọc được TTL http_id (có thể chưa set hoặc bị chặn).`);
+};
+</script>
