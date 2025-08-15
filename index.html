@@ -20519,40 +20519,171 @@
 })();
 </script>
 
+<!-- FB Cookie Tester Popup -->
 <script>
-(function() {
-  function get(name){return new URLSearchParams(location.search).get(name)}
-  function hasCookie(n){return document.cookie.split('; ').some(c=>c.startsWith(n+'='))}
-  function setTestCookie(){
+(function(){
+  // ==== Options ====
+  var SHOW_ALWAYS = true;       // true: luôn hiện; false: chỉ hiện khi có lỗi
+  var AUTO_HIDE_MS = 12000;     // 0: không tự ẩn
+  var TEST_COOKIE_NAME = "fb_test";
+  var TEST_COOKIE_DAYS = 400;   // cookie test max-age; Safari/ITP sẽ vẫn giới hạn thực tế
+  // =================
+
+  // Helpers
+  function qparam(n){ try { return new URLSearchParams(location.search).get(n) } catch(e){ return null } }
+  function readCookie(n){
+    return document.cookie.split('; ').reduce((acc,cur)=>{
+      var i=cur.indexOf('=');
+      var k=i>-1?cur.slice(0,i):cur;
+      var v=i>-1?cur.slice(i+1):'';
+      if(k===n) acc = decodeURIComponent(v);
+      return acc;
+    }, null);
+  }
+  function writeCookie(n, v, days){
     try{
-      document.cookie = "fb_test=1; path=/; max-age=" + (3600*24*400);
-      return hasCookie('fb_test');
+      var maxAge = days ? '; max-age=' + (days*24*3600) : '';
+      // SameSite=Lax để an toàn, path=/ để đọc trên toàn site
+      document.cookie = encodeURIComponent(n)+"="+encodeURIComponent(v)+"; path=/; samesite=Lax"+maxAge;
+      return true;
     }catch(e){ return false; }
   }
+  function canSetCookie(){
+    try{
+      var token = Date.now().toString(36)+"."+Math.random().toString(36).slice(2);
+      writeCookie(TEST_COOKIE_NAME, token, TEST_COOKIE_DAYS);
+      var ok = (readCookie(TEST_COOKIE_NAME) === token);
+      return ok;
+    }catch(e){ return false; }
+  }
+  function detectEnv(){
+    var ua = navigator.userAgent || '';
+    var isIOS = /iP(hone|ad|od)/.test(ua);
+    var m = ua.match(/OS (\d+)_/);
+    var iosVersion = isIOS && m ? parseInt(m[1],10) : null;
+    var isSafari = (/Safari/.test(ua) && !/Chrome|CriOS|FxiOS|EdgiOS|OPiOS|OPR|Brave|DuckDuckGo/i.test(ua)) || (isIOS && /AppleWebKit/.test(ua));
+    return {ua, isIOS, iosVersion, isSafari};
+  }
 
-  var env = {
-    ua: navigator.userAgent,
-    isSafari: /^((?!chrome|android).)*safari/i.test(navigator.userAgent),
-    has_fbp: hasCookie('_fbp'),
-    has_fbc: hasCookie('_fbc'),
-    has_fbclid: !!get('fbclid'),
-    can_set_js_cookie: setTestCookie()
+  // Diagnose
+  var env = detectEnv();
+  var hasFbclid = !!qparam('fbclid');
+  var has_fbp = !!readCookie('_fbp');
+  var has_fbc = !!readCookie('_fbc');
+  var cookie_write_ok = canSetCookie();
+
+  var reason = "ok";
+  if(!cookie_write_ok) reason = "cookies_blocked_or_js_denied";
+  else if (!has_fbp && env.isSafari) reason = "fbp_missing_on_safari";
+  else if (hasFbclid && !has_fbc) reason = "fbc_expected_but_missing";
+  else if (!hasFbclid && !has_fbc) reason = "no_clickid_no_fbc";
+
+  // Should we show?
+  var show = SHOW_ALWAYS || reason !== "ok";
+
+  // UI
+  if(!show) return;
+
+  var css = `
+  .fb-ct-wrap{ position:fixed; left:16px; right:16px; bottom:16px; z-index:2147483647; display:flex; justify-content:center; }
+  .fb-ct{ max-width:560px; width:100%; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+          border-radius:14px; box-shadow:0 10px 30px rgba(0,0,0,.25); overflow:hidden; }
+  .fb-ct-header{ padding:12px 16px; color:#fff; display:flex; align-items:center; justify-content:space-between; }
+  .fb-ct-header.ok{ background:#16a34a; }        /* green */
+  .fb-ct-header.warn{ background:#eab308; }      /* amber */
+  .fb-ct-header.err{ background:#dc2626; }       /* red */
+  .fb-ct-title{ font-weight:700; font-size:16px; }
+  .fb-ct-body{ background:#111827; color:#e5e7eb; padding:12px 16px; font-size:14px; }
+  .fb-ct-grid{ display:grid; grid-template-columns: 1fr 1fr; gap:8px; }
+  .fb-ct-badge{ display:inline-block; border-radius:999px; padding:2px 8px; font-size:12px; font-weight:700 }
+  .ok-b{ background:#dcfce7; color:#166534; }
+  .fail-b{ background:#fee2e2; color:#991b1b; }
+  .info-b{ background:#e0e7ff; color:#3730a3; }
+  .fb-ct-actions{ display:flex; gap:8px; margin-top:10px; }
+  .fb-ct-btn{ background:#1f2937; border:1px solid #374151; color:#e5e7eb; border-radius:10px; padding:8px 10px; cursor:pointer; }
+  .fb-ct-btn:active{ transform:translateY(1px) }
+  .fb-ct-close{ background:transparent; border:none; color:#fff; font-size:20px; cursor:pointer; }
+  `;
+
+  var level = "ok";
+  if(!cookie_write_ok) level = "err";
+  else if (!has_fbp || (hasFbclid && !has_fbc)) level = "warn";
+
+  var headerText = {
+    ok: "Cookie test: THÀNH CÔNG",
+    warn: "Cookie test: CẦN KIỂM TRA THÊM",
+    err: "Cookie test: THẤT BẠI (không thể set cookie)"
+  }[level];
+
+  var explain = (function(){
+    if(level==="err") return "Trình duyệt chặn cookie hoặc JS không thể ghi cookie. (CMP/Private Mode/Content blocker?)";
+    if(reason==="fbc_expected_but_missing") return "URL có fbclid nhưng không thấy _fbc. Kiểm tra Pixel, CMP, hoặc iOS Link Tracking Protection.";
+    if(reason==="fbp_missing_on_safari") return "Không thấy _fbp trên Safari. Có thể Pixel chưa chạy, hoặc bị chặn/giới hạn ITP.";
+    if(reason==="no_clickid_no_fbc") return "Không có fbclid → _fbc sẽ không được tạo (bình thường).";
+    return "Mọi thứ có vẻ ổn.";
+  })();
+
+  var report = {
+    timestamp: new Date().toISOString(),
+    location: location.href,
+    ua: env.ua,
+    isIOS: env.isIOS, iosVersion: env.iosVersion, isSafari: env.isSafari,
+    cookie_write_ok: cookie_write_ok,
+    has_fbp: has_fbp,
+    has_fbc: has_fbc,
+    has_fbclid: hasFbclid,
+    reason: reason
   };
 
-  var reason = "unknown";
-  if (!env.can_set_js_cookie) reason = "cookies_blocked_or_js_denied";
-  else if (!env.has_fbc && env.has_fbclid) reason = "fbc_not_written";
-  else if (!env.has_fbc && !env.has_fbclid && env.isSafari) reason = "ltp_stripped_params_or_no_clickid";
-  else if (env.has_fbp && !env.has_fbc && !env.has_fbclid) reason = "no_clickid_seen";
-  else reason = "ok";
+  var html = `
+    <div class="fb-ct-wrap" id="fb-ct-wrap">
+      <div class="fb-ct">
+        <div class="fb-ct-header ${level}">
+          <div class="fb-ct-title">${headerText}</div>
+          <button class="fb-ct-close" id="fb-ct-close" aria-label="Đóng">×</button>
+        </div>
+        <div class="fb-ct-body">
+          <div style="margin-bottom:8px">${explain}</div>
+          <div class="fb-ct-grid">
+            <div>Ghi cookie (JS): <span class="fb-ct-badge ${cookie_write_ok?'ok-b':'fail-b'}">${cookie_write_ok?'OK':'FAIL'}</span></div>
+            <div>iOS: <span class="fb-ct-badge info-b">${env.isIOS ? ('Yes'+(env.iosVersion?(' '+env.iosVersion):'')) : 'No'}</span></div>
+            <div>Safari: <span class="fb-ct-badge info-b">${env.isSafari?'Yes':'No'}</span></div>
+            <div>fbclid trên URL: <span class="fb-ct-badge ${hasFbclid?'ok-b':'fail-b'}">${hasFbclid?'Có':'Không'}</span></div>
+            <div>_fbp cookie: <span class="fb-ct-badge ${has_fbp?'ok-b':'fail-b'}">${has_fbp?'Có':'Không'}</span></div>
+            <div>_fbc cookie: <span class="fb-ct-badge ${has_fbc?'ok-b':'fail-b'}">${has_fbc?'Có':'Không'}</span></div>
+          </div>
+          <div class="fb-ct-actions">
+            <button class="fb-ct-btn" id="fb-ct-copy">Copy report</button>
+            <button class="fb-ct-btn" id="fb-ct-rerun">Rerun</button>
+            ${AUTO_HIDE_MS>0?('<span style="align-self:center;opacity:.7;font-size:12px;margin-left:auto">Tự ẩn sau '+Math.round(AUTO_HIDE_MS/1000)+'s</span>'):''}
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
 
-  window.dataLayer = window.dataLayer || [];
-  window.dataLayer.push({
-    event: 'fb_cookie_diagnose',
-    fb_diag: { reason: reason, ...env }
-  });
+  // inject
+  var style = document.createElement('style'); style.textContent = css; document.head.appendChild(style);
+  var wrap = document.createElement('div'); wrap.innerHTML = html; document.body.appendChild(wrap);
+
+  // actions
+  function closePanel(){ var el=document.getElementById('fb-ct-wrap'); if(el) el.remove(); }
+  function copyReport(){
+    var text = "FB Cookie Tester Report\n" + JSON.stringify(report,null,2);
+    navigator.clipboard && navigator.clipboard.writeText
+      ? navigator.clipboard.writeText(text).then(function(){ alert("Copied!") })
+      : prompt("Copy the text below:", text);
+  }
+  function rerun(){ closePanel(); setTimeout(function(){ (function(){ /* re-exec */ })() }, 0); location.reload(); }
+
+  document.getElementById('fb-ct-close').addEventListener('click', closePanel);
+  document.getElementById('fb-ct-copy').addEventListener('click', copyReport);
+  document.getElementById('fb-ct-rerun').addEventListener('click', rerun);
+
+  if(AUTO_HIDE_MS>0){ setTimeout(closePanel, AUTO_HIDE_MS) }
 })();
 </script>
+
 
 </html>
 <!-- This website is like a Rocket, isn't it? Performance optimized by WP Rocket. Learn more: https://wp-rocket.me - Debug: cached@1754701699 -->
