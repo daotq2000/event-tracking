@@ -20519,6 +20519,40 @@
 })();
 </script>
 
+<script>
+(function() {
+  function get(name){return new URLSearchParams(location.search).get(name)}
+  function hasCookie(n){return document.cookie.split('; ').some(c=>c.startsWith(n+'='))}
+  function setTestCookie(){
+    try{
+      document.cookie = "fb_test=1; path=/; max-age=" + (3600*24*400);
+      return hasCookie('fb_test');
+    }catch(e){ return false; }
+  }
+
+  var env = {
+    ua: navigator.userAgent,
+    isSafari: /^((?!chrome|android).)*safari/i.test(navigator.userAgent),
+    has_fbp: hasCookie('_fbp'),
+    has_fbc: hasCookie('_fbc'),
+    has_fbclid: !!get('fbclid'),
+    can_set_js_cookie: setTestCookie()
+  };
+
+  var reason = "unknown";
+  if (!env.can_set_js_cookie) reason = "cookies_blocked_or_js_denied";
+  else if (!env.has_fbc && env.has_fbclid) reason = "fbc_not_written";
+  else if (!env.has_fbc && !env.has_fbclid && env.isSafari) reason = "ltp_stripped_params_or_no_clickid";
+  else if (env.has_fbp && !env.has_fbc && !env.has_fbclid) reason = "no_clickid_seen";
+  else reason = "ok";
+
+  window.dataLayer = window.dataLayer || [];
+  window.dataLayer.push({
+    event: 'fb_cookie_diagnose',
+    fb_diag: { reason: reason, ...env }
+  });
+})();
+</script>
 
 </html>
 <!-- This website is like a Rocket, isn't it? Performance optimized by WP Rocket. Learn more: https://wp-rocket.me - Debug: cached@1754701699 -->
