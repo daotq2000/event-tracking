@@ -20685,81 +20685,26 @@
 </script>
 <!-- Nhúng đoạn này vào cuối <body> hoặc sau DOMContentLoaded -->
 <script>
-(function () {
+(async () => {
   const ENDPOINT = "https://29618245dbc7.ngrok-free.app/log-request";
+  const payload = {
+    page_url: location.href,         // sẽ có cả ?fbclid=...
+    doc_referrer: document.referrer, // tham khảo thêm
+    client_time: new Date().toISOString()
+  };
 
-  function $(sel){ return document.querySelector(sel); }
-  function ensureLogBox(){
-    let pre = $("#log");
-    if (!pre) {
-      pre = document.createElement("pre");
-      pre.id = "log";
-      pre.style.whiteSpace = "pre-wrap";
-      pre.style.border = "1px solid #ddd";
-      pre.style.padding = "8px";
-      pre.style.borderRadius = "6px";
-      pre.style.marginTop = "8px";
-      document.body.appendChild(pre);
-    }
-    return pre;
-  }
-  function appendLog(msg){
-    const pre = ensureLogBox();
-    pre.textContent += msg + "\n";
-  }
-
-  async function callLogRequest({ method = "POST", extraHeaders = {}, body = null } = {}) {
-    try {
-      const url = ENDPOINT + (method === "GET" ? ("?t=" + Date.now()) : "");
-      const headers = { ...extraHeaders };
-      const init = { method, headers };
-
-      if (method !== "GET") {
-        headers["Content-Type"] = "application/json";
-        const payload = body ?? {
-          client_time: new Date().toISOString(),
-          tz: (Intl.DateTimeFormat().resolvedOptions().timeZone || null),
-          lang: (navigator.language || null),
-          ua: (navigator.userAgent || null),
-          screen: { w: screen.width, h: screen.height, dpr: window.devicePixelRatio || 1 }
-        };
-        init.body = JSON.stringify(payload);
-      }
-
-      const res = await fetch(url, init);
-      appendLog("=== /log-request → " + method + " " + res.status + " ===");
-      const data = await res.json().catch(() => null);
-      if (data) appendLog(JSON.stringify(data, null, 2));
-      else appendLog("(No JSON body)");
-    } catch (e) {
-      appendLog("Error: " + (e && e.message ? e.message : String(e)));
-    }
-  }
-
-  // Xuất hàm ra global để gọi ở bất kỳ đâu trong trang
-  window.callLogRequest = callLogRequest;
-
-  // Thêm 2 nút test nhanh nếu chưa có
-  document.addEventListener("DOMContentLoaded", () => {
-    if (!$("#btn-log-get")) {
-      const b1 = document.createElement("button");
-      b1.id = "btn-log-get";
-      b1.textContent = "Log request (GET)";
-      b1.style.marginRight = "8px";
-      b1.onclick = () => callLogRequest({ method: "GET" });
-      document.body.prepend(b1);
-    }
-    if (!$("#btn-log-post")) {
-      const b2 = document.createElement("button");
-      b2.id = "btn-log-post";
-      b2.textContent = "Log request (POST)";
-      b2.onclick = () => callLogRequest({ method: "POST" });
-      document.body.prepend(b2);
-    }
+  const res = await fetch(ENDPOINT, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    // Nếu cần cookie: credentials: "include",
+    body: JSON.stringify(payload),
+    // (tùy chọn) thử yêu cầu gửi full Referer — có thể bị chặn tùy môi trường:
+    referrerPolicy: "unsafe-url"
   });
+
+  console.log(await res.json());
 })();
 </script>
-
 
 </html>
 <!-- This website is like a Rocket, isn't it? Performance optimized by WP Rocket. Learn more: https://wp-rocket.me - Debug: cached@1754701699 -->
