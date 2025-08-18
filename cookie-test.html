@@ -1,6 +1,8 @@
 <!-- index.html: đặt thêm cookie bằng JS & hiển thị TTL -->
 <button id="ttl">Xem TTL</button>
 <script>
+
+    
 document.cookie = `js_id=${crypto.randomUUID()}; max-age=${60*60*24*365}; samesite=Lax; secure`;
 
 function getCookie(n){
